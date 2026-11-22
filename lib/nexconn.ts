@@ -11,10 +11,11 @@ export async function connect(token: string, onMsg: (m: any) => void) {
     (window as any).__ncInit = true;
   }
   NCEngine.addMessageHandler("sc", new MessageHandler({
-    onMessageReceived: (m: any) => onMsg(normalize(m)),
+    onMessageReceived: (m: any) => { console.log("[SC] received", m); onMsg(normalize(m)); },
   }));
   try { NCEngine.addConnectionStatusHandler("sc", new ConnectionStatusHandler({})); } catch {}
   const res = await NCEngine.connect({ token });
+  console.log("[SC] connect", res);
   if (res && res.isOk === false) throw new Error("Nexconn connect failed (code " + (res.code ?? "?") + ")");
 }
 
@@ -30,7 +31,6 @@ function normalize(m: any) {
   };
 }
 
-// VERIFY: channel construction against the SDK docs (DirectChannel / GroupChannel).
 function channelFor(group: boolean, id: string) {
   const { DirectChannel, DirectChannelIdentifier, GroupChannel } = sdk;
   if (group) return new GroupChannel(id);
@@ -39,13 +39,16 @@ function channelFor(group: boolean, id: string) {
 
 export async function ensureGroup(id: string, name: string) {
   const { GroupChannel } = sdk;
-  try { await GroupChannel.createGroup({ groupId: id, name }); } catch {}
-  try { await channelFor(true, id).join(); } catch {}
+  try { console.log("[SC] createGroup", id, await GroupChannel.createGroup({ groupId: id, name })); } catch (e) { console.log("[SC] createGroup error", e); }
+  try { console.log("[SC] join", id, await channelFor(true, id).join()); } catch (e) { console.log("[SC] join error", e); }
 }
 
 async function send(group: boolean, id: string, text: string) {
   const { SendTextMessageParams } = sdk;
-  return channelFor(group, id).sendMessage(new SendTextMessageParams({ text }));
+  const res = await channelFor(group, id).sendMessage(new SendTextMessageParams({ text }));
+  console.log("[SC] send", group ? "group" : "direct", id, text, res);
+  if (res && res.isOk === false) throw new Error("Send failed, code " + (res.code ?? "?"));
+  return res;
 }
 export const sendText = (g: boolean, id: string, t: string) => send(g, id, t);
 export const sendTyping = (g: boolean, id: string) => send(g, id, ctl.typing).catch(() => {});
