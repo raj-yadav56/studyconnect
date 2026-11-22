@@ -15,15 +15,26 @@ export async function POST(req: Request) {
   const ts = String(Date.now());
   const sig = crypto.createHash("sha1").update(secret + nonce + ts).digest("hex");
   const host = process.env.NEXCONN_API_HOST || "api.sg-light-api.com";
-  // VERIFY: path/body field names against Nexconn Server API docs if this returns an error.
-  const r = await fetch(`https://${host}/v4/auth/access-token/issue`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "App-Key": key, Nonce: nonce, Timestamp: ts, Signature: sig },
-    body: JSON.stringify({ user_id: userId, id: userId, name: name || userId }),
-  });
-  const j: any = await r.json().catch(() => ({}));
-  const token = j.token ?? j.data?.token ?? j.access_token ?? j.data?.access_token;
-  if (!token) return NextResponse.json({ error: "Token request failed", detail: j }, { status: 502 });
+  const nm = name || userId;
+  const variants: { type: string; body: string }[] = [
+    { type: "application/json", body: JSON.stringify({ userId, name: nm }) },
+    { type: "application/json", body: JSON.stringify({ user_id: userId, name: nm }) },
+    { type: "application/x-www-form-urlencoded", body: new URLSearchParams({ userId, name: nm }).toString() },
+    { type: "application/x-www-form-urlencoded", body: new URLSearchParams({ user_id: userId, name: nm }).toString() },
+  ];
+  let token: string | undefined; const errs: any[] = [];
+  for (const v of variants) {
+    const r = await fetch(`https://${host}/v4/auth/access-token/issue`, {
+      method: "POST",
+      headers: { "Content-Type": v.type, "App-Key": key, Nonce: nonce, Timestamp: ts, Signature: sig },
+      body: v.body,
+    });
+    const j: any = await r.json().catch(() => ({}));
+    errs.push({ v: "v" + (errs.length + 1), status: r.status, res: j });
+    token = j.token ?? j.accessToken ?? j.data?.token ?? j.data?.accessToken ?? j.access_token ?? j.data?.access_token;
+    if (token) break;
+  }
+  if (!token) return NextResponse.json({ error: "Token request failed", detail: errs, build: "v3" }, { status: 502 });
 
   registry.set(userId, { userId, name: name || userId, subject: subject || "", seen: Date.now() });
   return NextResponse.json({ token });
